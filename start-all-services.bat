@@ -42,14 +42,20 @@ echo [3/3] Starting Main Backend Server (Port 5000)...
 start "Main Backend Server" cmd /k "cd /d "%~dp0backend" && npm run dev"
 timeout /t 3 /nobreak >nul
 
+REM Start the flashcard service
+echo [4/4] Starting Flashcard Service (Port 5005)...
+start "Flashcard Service" cmd /k "cd /d "%~dp0backend\flashcard-service" && npm run start"
+timeout /t 3 /nobreak >nul
+
 echo.
 echo =====================================
 echo All services are starting up...
 echo.
 echo Services:
 echo - Semantic Search Server: http://localhost:5001
-echo - RAG Server: http://localhost:5002  
+echo - RAG Server: http://localhost:5002
 echo - Main Backend: http://localhost:5000
+echo - Flashcard Service: http://localhost:5005
 echo.
 echo Frontend should be available at: http://localhost:3000
 echo (Start frontend separately with: cd frontend && npm run dev)

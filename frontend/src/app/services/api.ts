@@ -73,6 +73,54 @@ export const uploadDocument = async (file: File): Promise<DocumentUploadResponse
   return response.json();
 };
 
+// Flashcard API
+
+export const getFlashcards = async (documentId: string) => {
+  const response = await fetch(`${API_BASE_URL}/flashcards/${documentId}`);
+  if (!response.ok) {
+    throw new Error('Failed to fetch flashcards');
+  }
+  return response.json();
+};
+
+export const createFlashcard = async (flashcard: { documentId: string; question: string; answer: string }) => {
+  const response = await fetch(`${API_BASE_URL}/flashcards`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(flashcard),
+  });
+  if (!response.ok) {
+    throw new Error('Failed to create flashcard');
+  }
+  return response.json();
+};
+
+export const updateFlashcard = async (id: string, flashcard: { question: string; answer: string }) => {
+  const response = await fetch(`${API_BASE_URL}/flashcards/${id}`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(flashcard),
+  });
+  if (!response.ok) {
+    throw new Error('Failed to update flashcard');
+  }
+  return response.json();
+};
+
+export const deleteFlashcard = async (id: string) => {
+  const response = await fetch(`${API_BASE_URL}/flashcards/${id}`, {
+    method: 'DELETE',
+  });
+  if (!response.ok) {
+    throw new Error('Failed to delete flashcard');
+  }
+  return response.json();
+};
+
 /**
  * Get all documents
  */

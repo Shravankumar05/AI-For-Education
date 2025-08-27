@@ -8,6 +8,8 @@ const { MongoClient } = require('mongodb');
 const pdfParse = require('pdf-parse');
 const axios = require('axios');
 const { spawn } = require('child_process');
+const mongoose = require('mongoose');
+require('./models/flashcard');
 
 // Load environment variables
 dotenv.config();
@@ -73,6 +75,9 @@ async function checkSemanticSearchServer() {
 // Connect to MongoDB
 async function connectToMongoDB() {
   try {
+    await mongoose.connect(MONGODB_URI);
+    console.log('Mongoose connected to MongoDB');
+
     const client = new MongoClient(MONGODB_URI, { serverSelectionTimeoutMS: 5000 });
     await client.connect();
     console.log('Connected to MongoDB');
@@ -84,6 +89,9 @@ async function connectToMongoDB() {
     }
     if (!(await db.listCollections({ name: 'embeddings' }).hasNext())) {
       await db.createCollection('embeddings');
+    }
+    if (!(await db.listCollections({ name: 'flashcards' }).hasNext())) {
+      await db.createCollection('flashcards');
     }
     
     useInMemoryStorage = false;
@@ -180,6 +188,20 @@ if (!fs.existsSync(uploadsDir)) {
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Import flashcard routes and controller
+const {
+  getFlashcards,
+  createFlashcard,
+  updateFlashcard,
+  deleteFlashcard,
+} = require('./controllers/flashcardController');
+
+// Flashcard routes
+app.get('/api/flashcards/:documentId', getFlashcards);
+app.post('/api/flashcards', createFlashcard);
+app.put('/api/flashcards/:id', updateFlashcard);
+app.delete('/api/flashcards/:id', deleteFlashcard);
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({

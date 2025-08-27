@@ -5,6 +5,7 @@ import path from 'path';
 import fs from 'fs';
 import connectDB from './config/db';
 import documentRoutes from './routes/documentRoutes';
+import flashcardRoutes from './routes/flashcardRoutes.js';
 
 // Load environment variables
 dotenv.config();
@@ -29,6 +30,7 @@ app.use(express.urlencoded({ extended: true }));
 
 // Routes
 app.use('/api/documents', documentRoutes);
+app.use('/api/flashcards', flashcardRoutes);
 
 // Health check route
 app.get('/api/health', (_req, res) => {

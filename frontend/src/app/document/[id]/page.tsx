@@ -1,9 +1,16 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, use } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { getDocument, searchDocument, askQuestion } from '../../services/api';
+import {
+  getDocument,
+  searchInDocument,
+  askQuestion,
+  createFlashcard,
+  searchDocument, 
+} from '../../services/api';
+import { Document, SearchResult, QAResponse } from '../../services/api';
 
 interface Document {
   _id: string;
@@ -55,6 +62,9 @@ const DocumentDetailPage = () => {
   const [qaResponse, setQaResponse] = useState<QAResponse | null>(null);
   const [isAsking, setIsAsking] = useState<boolean>(false);
   const [qaError, setQaError] = useState<string | null>(null);
+  const [isSavingFlashcard, setIsSavingFlashcard] = useState(false);
+  const [saveFlashcardSuccess, setSaveFlashcardSuccess] = useState(false);
+  const [saveFlashcardError, setSaveFlashcardError] = useState<string | null>(null);
 
   // Fetch document details
   useEffect(() => {
@@ -121,6 +131,29 @@ const DocumentDetailPage = () => {
       setQaError(err instanceof Error ? err.message : 'Q&A failed');
     } finally {
       setIsAsking(false);
+    }
+  };
+
+  const handleSaveFlashcard = async () => {
+    if (!qaResponse || !documentId) return;
+
+    setIsSavingFlashcard(true);
+    setSaveFlashcardSuccess(false);
+    setSaveFlashcardError(null);
+
+    try {
+      await createFlashcard({
+        documentId,
+        question,
+        answer: qaResponse.answer,
+      });
+      setSaveFlashcardSuccess(true);
+      setTimeout(() => setSaveFlashcardSuccess(false), 3000); // Hide after 3s
+    } catch (error) {
+      console.error('Failed to save flashcard:', error);
+      setSaveFlashcardError('Failed to save flashcard. Please try again.');
+    } finally {
+      setIsSavingFlashcard(false);
     }
   };
 
@@ -201,6 +234,16 @@ const DocumentDetailPage = () => {
               }`}
             >
               Q&A
+            </Link>
+            <Link
+              href={`/document/${documentId}/flashcards`}
+              className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                activeTab === 'flashcards'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Flashcards
             </Link>
           </nav>
         </div>
@@ -389,6 +432,23 @@ const DocumentDetailPage = () => {
                       {qaResponse.answer}
                     </div>
                   </div>
+                  <button
+                    onClick={handleSaveFlashcard}
+                    disabled={isSavingFlashcard}
+                    className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+                  >
+                    {isSavingFlashcard ? 'Saving...' : 'Save as Flashcard'}
+                  </button>
+                  {saveFlashcardSuccess && (
+                    <div className="mt-2 text-sm text-green-600">
+                      Flashcard saved successfully!
+                    </div>
+                  )}
+                  {saveFlashcardError && (
+                    <div className="mt-2 text-sm text-red-600">
+                      {saveFlashcardError}
+                    </div>
+                  )}
                   
                   {qaResponse.context && qaResponse.context.length > 0 && (
                     <div className="border-t pt-4">
