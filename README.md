@@ -140,10 +140,13 @@ graph TB
 - **API Design**: RESTful architecture with comprehensive error handling
 
 ### **AI/ML Technologies**
-- **Embeddings**: sentence-transformers (all-MiniLM-L6-v2)
-- **LLM Integration**: Ollama with llama3.2:1b for resource efficiency
-- **Vector Search**: FAISS for high-performance similarity search
-- **NLP Processing**: Custom text processing and semantic analysis
+- **Embeddings**: sentence-transformers for document vectorization
+- **LLM Integration**: Ollama with llama3.2:1b model for resource-efficient text generation
+- **Embedding Model**: nomic-embed-text via Ollama for semantic understanding
+- **Vector Search**: FAISS for high-performance similarity search and retrieval
+- **NLP Processing**: Custom text processing with semantic-aware chunking
+- **Model Selection**: Optimized for limited hardware (integrated graphics, older CPUs)
+- **RAG Architecture**: Retrieval-Augmented Generation with context-aware responses
 
 ### **Infrastructure & DevOps**
 - **Containerization**: Docker support for consistent deployment
@@ -160,6 +163,7 @@ Before setting up the project, ensure you have the following installed:
 - **Node.js** v18.0+ ([Download here](https://nodejs.org/))
 - **Python** 3.8+ ([Download here](https://python.org/))
 - **MongoDB** 8.0+ ([Download here](https://mongodb.com/try/download/community))
+- **Ollama** ([Download here](https://ollama.ai/download))
 - **Git** ([Download here](https://git-scm.com/))
 - **npm** or **yarn** (comes with Node.js)
 
@@ -171,6 +175,32 @@ Before setting up the project, ensure you have the following installed:
 ---
 
 ## 🚀 Quick Start Guide
+
+### **Automated Setup (Recommended)**
+
+Use our automated setup scripts to install all dependencies and models:
+
+**Linux/macOS:**
+```bash
+# Make script executable and run
+chmod +x setup.sh
+./setup.sh
+```
+
+**Windows:**
+```batch
+# Run setup script as administrator
+setup.bat
+```
+
+The setup script will:
+- Install Node.js, Python, MongoDB, and Ollama
+- Download required AI models (llama3.2:1b, nomic-embed-text)
+- Install all project dependencies
+- Create optimized startup scripts
+- Verify installation
+
+### **Manual Setup (Alternative)**
 
 ### **1. Clone the Repository**
 ```bash
@@ -205,6 +235,40 @@ pip install sentence-transformers numpy flask torch transformers
 # For GPU acceleration (optional)
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 ```
+
+#### **Setup Ollama and AI Models**
+
+**1. Install Ollama:**
+- Download from [ollama.ai](https://ollama.ai/download)
+- Follow installation instructions for your OS
+- Verify installation: `ollama --version`
+
+**2. Pull Required Models:**
+```bash
+# Pull the lightweight language model for Q&A generation
+ollama pull llama3.2:1b
+
+# Pull the embedding model for semantic search
+ollama pull nomic-embed-text
+
+# Verify models are installed
+ollama list
+```
+
+**3. Start Ollama Service:**
+```bash
+# Start Ollama server (runs on port 11434 by default)
+ollama serve
+
+# Verify service is running
+curl http://localhost:11434/api/tags
+```
+
+**Why These Models?**
+- **llama3.2:1b**: Lightweight (1.3GB) yet capable language model optimized for resource-constrained environments
+- **nomic-embed-text**: Efficient embedding model (274MB) designed for semantic search and retrieval tasks
+- **Hardware Compatibility**: Both models run efficiently on systems with integrated graphics and older CPUs
+- **Performance**: Balanced trade-off between quality and computational requirements
 
 #### **Setup MongoDB**
 
@@ -331,6 +395,154 @@ AI: "The document describes backpropagation as..."
 2. **Study Mode**: Interactive flip cards with progress tracking
 3. **Review Scheduling**: Spaced repetition based on performance
 4. **Export Options**: Download as CSV for external tools
+
+---
+
+## 🧠 How It Works: AI Systems Deep Dive
+
+### **🔍 Semantic Search System**
+
+The semantic search system uses a sophisticated multi-stage approach:
+
+#### **1. Document Processing Pipeline**
+```mermaid
+graph LR
+    A[Upload Document] --> B[Text Extraction]
+    B --> C[Semantic Chunking]
+    C --> D[Generate Embeddings]
+    D --> E[Store in Vector DB]
+    E --> F[Index Creation]
+```
+
+**Semantic Chunking Algorithm:**
+- **Structure-Aware**: Respects document hierarchy (headers, paragraphs, lists)
+- **Overlap Strategy**: 50-word overlap between chunks for context preservation
+- **Dynamic Sizing**: Adapts chunk size based on content structure (300 words target)
+- **Metadata Extraction**: Captures section headers and document structure
+
+**Embedding Generation:**
+- **Model**: sentence-transformers (all-MiniLM-L6-v2) via Python
+- **Fallback**: nomic-embed-text via Ollama for consistency
+- **Vector Size**: 384 dimensions for efficient storage and retrieval
+- **Storage**: FAISS vector database for high-performance similarity search
+
+#### **2. Multi-Signal Ranking Algorithm**
+
+Our search combines multiple relevance signals for superior results:
+
+```python
+final_score = (
+    exact_phrase_match * 0.40 +     # Prioritizes exact phrase matches
+    individual_terms * 0.30 +       # Considers individual word matches
+    term_proximity * 0.20 +         # Rewards close term proximity
+    structural_importance * 0.10     # Weighs document structure
+)
+```
+
+**Why This Works:**
+- **Exact Phrase Priority**: Handles multi-word queries effectively
+- **Term Distribution**: Balances comprehensive vs. precise matching
+- **Context Awareness**: Proximity scoring maintains semantic relationships
+- **Structure Weight**: Headers and important sections get boost
+
+### **🤖 RAG (Retrieval-Augmented Generation) System**
+
+The Q&A system implements a sophisticated RAG architecture:
+
+#### **1. Question Processing Flow**
+```mermaid
+graph TD
+    A[User Question] --> B[Query Analysis]
+    B --> C[Semantic Search]
+    C --> D[Context Retrieval]
+    D --> E[Context Ranking]
+    E --> F[Prompt Engineering]
+    F --> G[LLM Generation]
+    G --> H[Response + Citations]
+```
+
+**Query Enhancement:**
+- **Intent Recognition**: Analyzes question type and context
+- **Keyword Extraction**: Identifies key terms for better retrieval
+- **Query Expansion**: Adds related terms for comprehensive search
+
+#### **2. Context Retrieval & Ranking**
+
+**Retrieval Strategy:**
+- **Top-K Selection**: Retrieves top 5-10 most relevant chunks
+- **Diversity Filter**: Ensures variety in retrieved content
+- **Similarity Threshold**: Filters out low-relevance results (< 0.3 similarity)
+
+**Context Preparation:**
+```python
+context_prompt = f"""
+Use only the following pieces of context to answer the question.
+Don't make up any new information:
+
+{formatted_context}
+
+Question: {user_question}
+"""
+```
+
+#### **3. Language Model Integration**
+
+**Model Selection Rationale:**
+- **llama3.2:1b**: Lightweight (1.3GB) yet capable
+- **Resource Efficient**: Runs on integrated graphics and older CPUs
+- **Context Window**: 4K tokens for comprehensive context
+- **Streaming**: Real-time response generation
+
+**Prompt Engineering:**
+- **System Instructions**: Clear guidelines for factual responses
+- **Context Formatting**: Structured input for better comprehension
+- **Citation Integration**: Automatic source attribution
+- **Hallucination Prevention**: Strict adherence to provided context
+
+#### **4. Response Generation Process**
+
+**Generation Parameters:**
+```python
+ollama.chat(
+    model='llama3.2:1b',
+    messages=[
+        {'role': 'system', 'content': instruction_prompt},
+        {'role': 'user', 'content': question}
+    ],
+    stream=True,  # Real-time response
+    options={
+        'temperature': 0.3,  # Lower creativity for factual responses
+        'top_p': 0.9,       # Nucleus sampling for quality
+        'max_tokens': 1000   # Comprehensive but focused answers
+    }
+)
+```
+
+**Quality Assurance:**
+- **Source Attribution**: Each answer includes relevant document chunks
+- **Confidence Scoring**: Similarity scores indicate answer reliability
+- **Fallback Handling**: Graceful degradation when models unavailable
+- **Error Recovery**: Comprehensive error handling and user feedback
+
+### **📊 Performance Optimizations**
+
+#### **Hardware Efficiency**
+- **Model Size**: Sub-2GB total footprint for all models
+- **CPU Optimization**: Efficient inference on integrated graphics
+- **Memory Management**: Lazy loading and model caching
+- **Batch Processing**: Optimized embedding generation
+
+#### **Response Speed**
+- **Vector Search**: Sub-100ms similarity search with FAISS
+- **Streaming Responses**: Real-time answer generation
+- **Caching**: Intelligent caching of embeddings and responses
+- **Connection Pooling**: Efficient database and API connections
+
+#### **Scalability Features**
+- **Microservices Architecture**: Independent scaling of components
+- **Database Sharding**: MongoDB collections optimized for growth
+- **Load Balancing**: Multiple service instances supported
+- **Resource Monitoring**: Comprehensive logging and metrics
 
 ---
 
