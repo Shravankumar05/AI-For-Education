@@ -3,6 +3,7 @@
  */
 
 const API_BASE_URL = 'http://localhost:5000/api';
+const SEARCH_API_BASE_URL = 'http://localhost:5005';
 
 export interface Document {
   _id: string;
@@ -17,16 +18,15 @@ export interface SearchResult {
   text: string;
   highlighted_text: string;
   similarity: number;
+  rerank_score: number;
   start_idx: number;
   end_idx: number;
   word_count: number;
 }
 
 export interface SearchResponse {
-  success: boolean;
+  status: string;
   results: SearchResult[];
-  documentName: string;
-  fallback?: boolean;
   message?: string;
 }
 
@@ -80,7 +80,8 @@ export const getFlashcards = async (documentId: string) => {
   if (!response.ok) {
     throw new Error('Failed to fetch flashcards');
   }
-  return response.json();
+  const data = await response.json();
+  return data; // Returns { success: true, flashcards: [...] }
 };
 
 export const createFlashcard = async (flashcard: { documentId: string; question: string; answer: string }) => {
@@ -121,6 +122,33 @@ export const deleteFlashcard = async (id: string) => {
   return response.json();
 };
 
+// New flashcard functions
+export const getFlashcardsForReview = async (documentId: string) => {
+  const response = await fetch(`${API_BASE_URL}/flashcards/${documentId}/review`);
+  if (!response.ok) {
+    throw new Error('Failed to fetch flashcards for review');
+  }
+  return response.json();
+};
+
+export const exportFlashcardsCSV = async (documentId: string) => {
+  const response = await fetch(`${API_BASE_URL}/flashcards/${documentId}/export`);
+  if (!response.ok) {
+    throw new Error('Failed to export flashcards');
+  }
+  
+  // Create download link
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'flashcards.csv';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
+};
+
 /**
  * Get all documents
  */
@@ -131,6 +159,26 @@ export const getDocuments = async (): Promise<DocumentListResponse> => {
     throw new Error(`Failed to fetch documents with status: ${response.status}`);
   }
   
+  return response.json();
+};
+
+/**
+ * Index a document for search
+ */
+export const indexDocument = async (documentId: string): Promise<any> => {
+  const doc = await getDocument(documentId);
+  const response = await fetch(`${SEARCH_API_BASE_URL}/index`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ documentId, text: doc.text }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Indexing failed with status: ${response.status}`);
+  }
+
   return response.json();
 };
 

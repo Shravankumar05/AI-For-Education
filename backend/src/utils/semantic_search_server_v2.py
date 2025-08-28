@@ -6,17 +6,13 @@ import numpy as np
 from typing import Dict, Any, List, Optional
 import os
 import logging
-import ollama
 from sentence_transformers import CrossEncoder
 
 # Import semantic search utilities
 from semantic_search import (
-    cosine_similarity, 
-    search_documents, 
-    extract_keywords, 
-    highlight_text, 
+    Searcher,
     semantic_chunk_text,
-    enhanced_similarity
+    highlight_text
 )
 
 # Configure logging
@@ -24,11 +20,14 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 # Constants
 DEFAULT_PORT = 5004
-EMBEDDING_MODEL = 'nomic-embed-text'
+EMBEDDING_MODEL = 'all-MiniLM-L6-v2'
 RERANK_MODEL = 'cross-encoder/ms-marco-MiniLM-L-6-v2'
 
 # Load the reranker model
 reranker = CrossEncoder(RERANK_MODEL)
+
+# Instantiate the searcher
+searcher = Searcher(EMBEDDING_MODEL)
 
 class SemanticSearchHandlerV2(http.server.BaseHTTPRequestHandler):
     """
@@ -76,7 +75,9 @@ class SemanticSearchHandlerV2(http.server.BaseHTTPRequestHandler):
         try:
             data = json.loads(post_data.decode('utf-8'))
             
-            if self.path == '/search':
+            if self.path == '/index':
+                response = self._handle_index_request(data)
+            elif self.path == '/search':
                 response = self._handle_search_request(data)
             else:
                 self._set_headers(404)
@@ -94,29 +95,67 @@ class SemanticSearchHandlerV2(http.server.BaseHTTPRequestHandler):
 
         self.wfile.write(json.dumps(response).encode())
 
+    def _handle_index_request(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle indexing requests.
+        """
+        # Check for the new format with documentId and chunks
+        if 'documentId' in data and 'chunks' in data:
+            document_id = data['documentId']
+            chunks = data['chunks']
+            
+            if not chunks:
+                self._set_headers(400)
+                return {'status': 'error', 'message': 'No chunks provided'}
+            
+            # Build index using the provided chunks
+            searcher.build_index(chunks)
+            
+            self._set_headers()
+            return {'status': 'success', 'message': f'Indexed {len(chunks)} chunks for document {document_id}.'}
+        
+        # Fallback to old format for backward compatibility
+        elif 'text' in data:
+            text = data['text']
+            chunks = semantic_chunk_text(text)
+            searcher.build_index(chunks)
+
+            self._set_headers()
+            return {'status': 'success', 'message': f'Indexed {len(chunks)} chunks.'}
+        
+        else:
+            self._set_headers(400)
+            return {'status': 'error', 'message': 'Missing required field: documentId and chunks, or text'}
+
     def _handle_search_request(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Handle semantic search requests with metadata filtering and reranking.
         """
-        required_fields = ['query_embedding', 'chunk_embeddings', 'document_chunks', 'query']
-        for field in required_fields:
-            if field not in data:
-                self._set_headers(400)
-                return {'status': 'error', 'message': f'Missing required field: {field}'}
+        # Support both new format (documentId + query) and old format (query only)
+        if 'documentId' in data and 'query' in data:
+            document_id = data['documentId']
+            query = data['query']
+            top_k = data.get('top_k', 5)
+            
+            # Perform search (searcher should already be indexed with the document)
+            initial_results = searcher.search(query, top_k=top_k * 3)
+            
+        elif 'query' in data:
+            query = data['query']
+            top_k = data.get('top_k', 10)
+            
+            # Initial search
+            initial_results = searcher.search(query, top_k=top_k * 3)
+        else:
+            self._set_headers(400)
+            return {'status': 'error', 'message': 'Missing required field: query'}
         
-        query_embedding = data['query_embedding']
-        chunk_embeddings = data['chunk_embeddings']
-        document_chunks = data['document_chunks']
-        query = data['query']
-        top_k = data.get('top_k', 10)
-        
-        # Initial search
-        initial_results = search_documents(
-            query_embedding=query_embedding,
-            document_chunks=document_chunks,
-            chunk_embeddings=chunk_embeddings,
-            top_k=top_k * 3,  # Retrieve more results for reranking
-        )
+        if not initial_results:
+            self._set_headers()
+            return {
+                'status': 'success',
+                'results': []
+            }
         
         # Reranking
         passages = [result['text'] for result in initial_results]
@@ -127,6 +166,17 @@ class SemanticSearchHandlerV2(http.server.BaseHTTPRequestHandler):
             
         # Sort by rerank score
         reranked_results = sorted(initial_results, key=lambda x: x['rerank_score'], reverse=True)[:top_k]
+        
+        # Add missing fields expected by the backend
+        for result in reranked_results:
+            if 'highlighted_text' not in result:
+                # Simple highlighting
+                highlighted = highlight_text(result['text'], query.split())
+                result['highlighted_text'] = highlighted
+            if 'start_idx' not in result:
+                result['start_idx'] = 0
+            if 'end_idx' not in result:
+                result['end_idx'] = len(result['text'])
         
         self._set_headers()
         return {

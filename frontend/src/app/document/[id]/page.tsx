@@ -8,9 +8,11 @@ import {
   searchInDocument,
   askQuestion,
   createFlashcard,
-  searchDocument, 
+  searchDocument,
+  indexDocument,
 } from '../../services/api';
 import { Document, SearchResult, QAResponse } from '../../services/api';
+import FlashcardsTab from './FlashcardsTab';
 
 interface Document {
   _id: string;
@@ -80,6 +82,13 @@ const DocumentDetailPage = () => {
       
       const data = await getDocument(documentId);
       setDocument(data.document);
+
+      // Trigger indexing after fetching document details
+      // We can do this in the background and not wait for it
+      indexDocument(documentId).catch(indexErr => {
+        // Log indexing error but don't fail the whole page load
+        console.error("Failed to start document indexing:", indexErr);
+      });
     } catch (err) {
       console.error('Error fetching document:', err);
       setError(err instanceof Error ? err.message : 'Failed to load document');
@@ -204,10 +213,10 @@ const DocumentDetailPage = () => {
       <main className="max-w-6xl mx-auto px-4 py-8">
         {/* Tab Navigation */}
         <div className="border-b border-gray-200 mb-8">
-          <nav className="-mb-px flex space-x-8">
+          <nav className="-mb-px flex space-x-8" aria-label="Tabs">
             <Link
-              href={`/document/${documentId}`}
-              className={`py-2 px-1 border-b-2 font-medium text-sm ${
+              href={`/document/${documentId}?tab=overview`}
+              className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${
                 activeTab === 'overview'
                   ? 'border-blue-500 text-blue-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -217,7 +226,7 @@ const DocumentDetailPage = () => {
             </Link>
             <Link
               href={`/document/${documentId}?tab=search`}
-              className={`py-2 px-1 border-b-2 font-medium text-sm ${
+              className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${
                 activeTab === 'search'
                   ? 'border-blue-500 text-blue-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -227,7 +236,7 @@ const DocumentDetailPage = () => {
             </Link>
             <Link
               href={`/document/${documentId}?tab=qa`}
-              className={`py-2 px-1 border-b-2 font-medium text-sm ${
+              className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${
                 activeTab === 'qa'
                   ? 'border-blue-500 text-blue-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -236,8 +245,8 @@ const DocumentDetailPage = () => {
               Q&A
             </Link>
             <Link
-              href={`/document/${documentId}/flashcards`}
-              className={`py-2 px-1 border-b-2 font-medium text-sm ${
+              href={`/document/${documentId}?tab=flashcards`}
+              className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${
                 activeTab === 'flashcards'
                   ? 'border-blue-500 text-blue-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -479,6 +488,10 @@ const DocumentDetailPage = () => {
               </div>
             )}
           </div>
+        )}
+
+        {activeTab === 'flashcards' && (
+          <FlashcardsTab documentId={documentId} />
         )}
       </main>
     </div>

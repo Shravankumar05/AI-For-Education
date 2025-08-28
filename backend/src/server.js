@@ -29,7 +29,7 @@ let inMemoryEmbeddings = [];
 let useInMemoryStorage = false;
 
 // Semantic search server configuration
-const SEMANTIC_SEARCH_URL = 'http://localhost:5003';
+const SEMANTIC_SEARCH_URL = 'http://localhost:5005';
 let semanticSearchServer = null;
 
 // Start the semantic search server
@@ -195,6 +195,8 @@ const {
   createFlashcard,
   updateFlashcard,
   deleteFlashcard,
+  getFlashcardsForReview,
+  exportFlashcardsCSV,
 } = require('./controllers/flashcardController');
 
 // Flashcard routes
@@ -202,6 +204,8 @@ app.get('/api/flashcards/:documentId', getFlashcards);
 app.post('/api/flashcards', createFlashcard);
 app.put('/api/flashcards/:id', updateFlashcard);
 app.delete('/api/flashcards/:id', deleteFlashcard);
+app.get('/api/flashcards/:documentId/review', getFlashcardsForReview);
+app.get('/api/flashcards/:documentId/export', exportFlashcardsCSV);
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
@@ -252,11 +256,11 @@ function extractTextFromTXT(filePath) {
 // Function to generate embeddings using Ollama or fallback to mock embeddings
 async function generateEmbeddings(text) {
   try {
-    // Try to use the semantic search server for embeddings
+    // Try to use the semantic search server for embeddings only if it exists
     const response = await axios.post(`${SEMANTIC_SEARCH_URL}/embed`, {
       text: text
     }, {
-      timeout: 5000 // 5 second timeout
+      timeout: 2000 // 2 second timeout
     });
     
     if (response.data && response.data.embedding) {
@@ -266,7 +270,10 @@ async function generateEmbeddings(text) {
       throw new Error('Invalid embedding response');
     }
   } catch (error) {
-    console.warn('Failed to get real embeddings, using mock embeddings:', error.message);
+    // Only log warning if the error isn't a simple connection refused
+    if (!error.message.includes('ECONNREFUSED') && !error.message.includes('404')) {
+      console.warn('Semantic search server not available, using mock embeddings');
+    }
     return generateMockEmbeddings(text);
   }
 }
@@ -300,11 +307,13 @@ function generateMockEmbeddings(text) {
 // Helper function to chunk document text with semantic awareness
 async function chunkDocumentText(text) {
   try {
-    // Use semantic chunking for better context understanding
+    // Try to use semantic chunking if server is available
     const response = await axios.post(`${SEMANTIC_SEARCH_URL}/chunk`, {
       text,
       chunk_size: 500,  // Optimal size for educational content
       overlap: 100      // Sufficient overlap for context continuity
+    }, {
+      timeout: 2000 // 2 second timeout
     });
     
     if (response.data && response.data.chunks) {
@@ -314,9 +323,11 @@ async function chunkDocumentText(text) {
       throw new Error('Invalid response from semantic chunking service');
     }
   } catch (error) {
-    console.error('Error with semantic chunking:', error);
+    // Only log detailed error if it's not a simple connection issue
+    if (!error.message.includes('ECONNREFUSED') && !error.message.includes('404')) {
+      console.warn('Semantic search server not available, using fallback chunking');
+    }
     // Fallback to improved chunking if server fails
-    console.log('Using fallback chunking method');
     return improvedChunkText(text);
   }
 }
@@ -506,6 +517,26 @@ app.post('/api/documents/upload', upload.single('document'), async (req, res) =>
       
       docId = result.insertedId.toString();
     }
+    
+    // Index the document in the semantic search server
+    try {
+      console.log('Indexing document in semantic search server...');
+      const indexResponse = await axios.post(`${SEMANTIC_SEARCH_URL}/index`, {
+        documentId: docId,
+        chunks: chunks
+      }, {
+        timeout: 10000 // 10 second timeout for indexing
+      });
+      
+      if (indexResponse.data && indexResponse.data.status === 'success') {
+        console.log(`Successfully indexed document ${docId} in semantic search server`);
+      } else {
+        console.warn(`Failed to index document ${docId}:`, indexResponse.data?.message || 'Unknown error');
+      }
+    } catch (indexError) {
+      console.error('Error indexing document in semantic search server:', indexError.message);
+      // Don't fail the upload if indexing fails - the document is still saved
+    }
 
     return res.status(201).json({
       success: true,
@@ -603,13 +634,11 @@ app.post('/api/search', async (req, res) => {
     
     try {
       console.log('Sending search request to semantic search server...');
-      // Call enhanced semantic search server
+      // Call the new simplified semantic search server
       const response = await axios.post(`${SEMANTIC_SEARCH_URL}/search`, {
-        query_embedding: queryEmbedding,
-        chunk_embeddings: embeddings.chunkEmbeddings,
-        document_chunks: document.chunks,
-        query_terms: queryTerms,
-        top_k: topK  // Use configurable top_k
+        documentId: documentId,
+        query: query,
+        top_k: topK
       }, {
         timeout: 5000 // 5 second timeout
       });
@@ -661,10 +690,14 @@ app.post('/api/search', async (req, res) => {
   }
 });
 
-// Enhanced fallback search with improved ranking
+// Superior search algorithm with advanced multi-signal ranking
 function enhancedFallbackSearch(query, queryEmbedding, documentChunks, chunkEmbeddings, queryTerms, topK = 5) {
+  console.log(`Enhanced search for: "${query}" with terms: [${queryTerms.join(', ')}]`);
+  
   // Calculate cosine similarity
   function cosineSimilarity(vec1, vec2) {
+    if (!vec1 || !vec2 || vec1.length !== vec2.length) return 0;
+    
     let dotProduct = 0;
     let mag1 = 0;
     let mag2 = 0;
@@ -683,84 +716,157 @@ function enhancedFallbackSearch(query, queryEmbedding, documentChunks, chunkEmbe
     return dotProduct / (mag1 * mag2);
   }
   
-  // Calculate enhanced similarity scores
-  const scoredChunks = documentChunks.map((chunk, index) => {
-    // Embedding similarity
-    const embeddingSimilarity = chunkEmbeddings[index] ? 
-      cosineSimilarity(queryEmbedding, chunkEmbeddings[index]) : 0;
+  // Advanced text scoring algorithm
+  function calculateAdvancedTextScore(text, query, queryTerms) {
+    const textLower = text.toLowerCase();
+    const queryLower = query.toLowerCase();
+    let score = 0;
     
-    // Text-based scoring with improved weighting
-    const text = chunk.text.toLowerCase();
-    let textScore = 0;
-    
-    // Check for exact phrase match first (highest priority)
-    const exactPhrase = query ? query.toLowerCase() : '';
-    if (exactPhrase && text.includes(exactPhrase)) {
-      textScore += 2.0; // Strong bonus for exact phrase match
+    // 1. Exact query match (highest priority) - 40% weight
+    if (textLower.includes(queryLower)) {
+      const queryLength = queryLower.length;
+      const startIndex = textLower.indexOf(queryLower);
+      
+      // Bonus for exact match
+      score += 10.0;
+      
+      // Position bonus - earlier matches get higher scores
+      const positionBonus = Math.max(0, (1000 - startIndex) / 1000) * 2;
+      score += positionBonus;
+      
+      // Whole word boundary bonus
+      const beforeChar = startIndex > 0 ? text[startIndex - 1] : ' ';
+      const afterChar = startIndex + queryLength < text.length ? text[startIndex + queryLength] : ' ';
+      if (/\s/.test(beforeChar) && /\s/.test(afterChar)) {
+        score += 3.0; // Whole phrase bonus
+      }
     }
     
-    queryTerms.forEach(term => {
+    // 2. All terms present bonus - 30% weight
+    const presentTerms = queryTerms.filter(term => {
+      const termRegex = new RegExp(`\\b${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+      return termRegex.test(text);
+    });
+    
+    const termCoverage = presentTerms.length / Math.max(queryTerms.length, 1);
+    score += termCoverage * 8.0; // High bonus for having all terms
+    
+    // 3. Individual term matching with proximity - 20% weight
+    queryTerms.forEach((term, termIndex) => {
+      if (term.length < 2) return;
+      
       const termLower = term.toLowerCase();
-      // Match whole words only for better precision
-      const regex = new RegExp(`\\b${termLower}\\b`, 'gi');
-      const matches = (text.match(regex) || []).length;
+      const termRegex = new RegExp(`\\b${termLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
+      const matches = textLower.match(termRegex) || [];
       
-      // Weight longer terms more heavily with improved scaling
-      const termWeight = Math.min(term.length / 4, 2.5);
-      textScore += matches * termWeight;
-      
-      // Bonus for terms appearing in headers
-      if (chunk.header && chunk.header.toLowerCase().includes(termLower)) {
-        textScore += 1.5; // Strong bonus for terms in headers
+      if (matches.length > 0) {
+        // Base score for term presence
+        let termScore = matches.length * Math.min(term.length / 3, 2);
+        
+        // Length bonus for longer terms
+        if (term.length >= 4) termScore *= 1.5;
+        if (term.length >= 6) termScore *= 1.3;
+        
+        // Frequency bonus (diminishing returns)
+        termScore += Math.log(matches.length + 1) * 0.5;
+        
+        score += termScore;
       }
     });
     
-    // Normalize text score by chunk length with improved scaling
-    textScore = textScore / Math.log10(chunk.text.length / 100 + 1);
-    
-    // Structural bonuses
-    let structuralBonus = 0;
-    if (chunk.header) structuralBonus += 0.2;
-    if (chunk.section_start) structuralBonus += 0.1;
-    
-    // Word count bonus (prefer medium-length chunks)
-    const wordCount = chunk.word_count || chunk.text.split(' ').length;
-    let lengthBonus = 0;
-    if (wordCount >= 100 && wordCount <= 300) lengthBonus = 0.1;
-    else if (wordCount >= 50 && wordCount < 100) lengthBonus = 0.05;
-    
-    // Combined score with adaptive weighting
-    let vectorWeight = 0.6;
-    let textWeight = 0.25;
-    
-    // Adjust weights if query is a question (favor semantic matching)
-    if (query && query.trim().endsWith('?')) {
-      vectorWeight = 0.7;
-      textWeight = 0.15;
+    // 4. Term proximity bonus - 10% weight
+    if (queryTerms.length >= 2) {
+      for (let i = 0; i < queryTerms.length - 1; i++) {
+        const term1 = queryTerms[i];
+        const term2 = queryTerms[i + 1];
+        
+        const term1Regex = new RegExp(`\\b${term1.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+        const term2Regex = new RegExp(`\\b${term2.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+        
+        const match1 = term1Regex.exec(textLower);
+        const match2 = term2Regex.exec(textLower);
+        
+        if (match1 && match2) {
+          const distance = Math.abs(match1.index - match2.index);
+          if (distance < 100) { // Words within 100 characters
+            const proximityScore = Math.max(0, (100 - distance) / 100) * 2;
+            score += proximityScore;
+          }
+        }
+      }
     }
     
-    const combinedScore = (
-      vectorWeight * embeddingSimilarity +
-      textWeight * Math.min(textScore, 1) +
-      0.1 * structuralBonus +
-      0.05 * lengthBonus
-    );
+    return score;
+  }
+  
+  // Calculate enhanced similarity scores for each chunk
+  const scoredChunks = documentChunks.map((chunk, index) => {
+    // 1. Embedding similarity (30% weight)
+    const embeddingSimilarity = chunkEmbeddings[index] ? 
+      cosineSimilarity(queryEmbedding, chunkEmbeddings[index]) : 0;
+    
+    // 2. Advanced text scoring (60% weight)
+    const textScore = calculateAdvancedTextScore(chunk.text, query, queryTerms);
+    
+    // 3. Structural importance (10% weight)
+    let structuralScore = 0;
+    
+    // Header bonus
+    if (chunk.header) {
+      structuralScore += 0.5;
+      
+      // Check if query terms appear in header (very important)
+      const headerScore = calculateAdvancedTextScore(chunk.header, query, queryTerms);
+      if (headerScore > 0) {
+        structuralScore += 2.0; // Strong header match bonus
+      }
+    }
+    
+    // Section importance
+    if (chunk.section) {
+      structuralScore += 0.3;
+    }
+    
+    // Length normalization
+    const wordCount = chunk.word_count || chunk.text.split(' ').length;
+    let lengthFactor = 1;
+    
+    // Prefer medium-length chunks (100-500 words)
+    if (wordCount >= 100 && wordCount <= 500) {
+      lengthFactor = 1.2;
+    } else if (wordCount >= 50 && wordCount < 100) {
+      lengthFactor = 1.1;
+    } else if (wordCount > 500) {
+      lengthFactor = 0.9; // Slight penalty for very long chunks
+    } else if (wordCount < 50) {
+      lengthFactor = 0.8; // Penalty for very short chunks
+    }
+    
+    // Combine scores with weights
+    const finalScore = (
+      (embeddingSimilarity * 0.3) +
+      (Math.min(textScore / 10, 1) * 0.6) + // Normalize text score
+      (structuralScore * 0.1)
+    ) * lengthFactor;
     
     return {
       chunk,
       index,
-      similarity: combinedScore,
+      similarity: finalScore,
       embedding_similarity: embeddingSimilarity,
-      text_score: textScore
+      text_score: textScore,
+      structural_score: structuralScore,
+      word_count: wordCount
     };
   });
   
-  // Sort by combined score
+  // Sort by final score
   scoredChunks.sort((a, b) => b.similarity - a.similarity);
   
-  // Apply diversity filter to avoid too similar chunks
+  // Apply diversity and relevance filtering
   const diverseResults = [];
-  const usedHeaders = new Set();
+  const usedHeaders = new Map(); // Track header usage count
+  const minRelevanceThreshold = 0.1; // Minimum relevance score
   
   for (const item of scoredChunks) {
     if (diverseResults.length >= topK) break;
@@ -768,35 +874,39 @@ function enhancedFallbackSearch(query, queryEmbedding, documentChunks, chunkEmbe
     const chunk = item.chunk;
     const header = chunk.header;
     
-    // Skip if we already have 2 chunks from the same section
-    if (header && usedHeaders.has(header)) {
-      const sameHeaderCount = diverseResults.filter(r => r.header === header).length;
-      if (sameHeaderCount >= 2) continue;
+    // Skip if score is too low
+    if (item.similarity < minRelevanceThreshold) continue;
+    
+    // Diversity control - limit chunks from same header
+    if (header) {
+      const headerCount = usedHeaders.get(header) || 0;
+      if (headerCount >= 2) continue; // Max 2 chunks per header
+      usedHeaders.set(header, headerCount + 1);
     }
     
-    // Enhanced highlighting with improved context
+    // Enhanced highlighting
     let highlightedText = chunk.text;
     
-    // First, escape any HTML to prevent injection
+    // Escape HTML
     highlightedText = highlightedText
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
     
-    // Highlight exact phrase match first if it exists
+    // Highlight exact query match first (highest priority)
     if (query && query.trim().length > 0) {
-      const exactPhrase = query.trim();
-      const phraseRegex = new RegExp(`(${exactPhrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
-      highlightedText = highlightedText.replace(phraseRegex, '<mark class="exact-match">$1</mark>');
+      const exactQuery = query.trim();
+      const exactRegex = new RegExp(`(${exactQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+      highlightedText = highlightedText.replace(exactRegex, '<mark class="exact-match" style="background: #ff6b35; color: white; font-weight: bold;">$1</mark>');
     }
     
-    // Then highlight individual terms
+    // Highlight individual terms
     queryTerms.forEach(term => {
       if (term.length < 3) return;
       
-      // Use word boundary for more accurate matching
-      const regex = new RegExp(`\\b(${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})\\b`, 'gi');
-      highlightedText = highlightedText.replace(regex, '<mark>$1</mark>');
+      const termRegex = new RegExp(`\\b(${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})\\b`, 'gi');
+      // Use different highlight style for individual terms
+      highlightedText = highlightedText.replace(termRegex, '<mark style="background: #ffd23f;">$1</mark>');
     });
     
     const result = {
@@ -804,17 +914,21 @@ function enhancedFallbackSearch(query, queryEmbedding, documentChunks, chunkEmbe
       similarity: item.similarity,
       embedding_similarity: item.embedding_similarity,
       text_similarity: item.text_score,
+      structural_similarity: item.structural_score,
       highlighted_text: highlightedText,
       rank: diverseResults.length + 1,
       relevance_score: Math.round(item.similarity * 100),
-      word_count: chunk.word_count || chunk.text.split(' ').length,
+      word_count: item.word_count,
       has_header: Boolean(chunk.header),
-      preview: chunk.text.substring(0, 200) + (chunk.text.length > 200 ? '...' : '')
+      preview: chunk.text.substring(0, 200) + (chunk.text.length > 200 ? '...' : ''),
+      search_method: 'enhanced_algorithm'
     };
     
     diverseResults.push(result);
-    if (header) usedHeaders.add(header);
   }
+  
+  console.log(`Enhanced search returned ${diverseResults.length} results with scores:`, 
+    diverseResults.map(r => ({ similarity: r.similarity.toFixed(3), text_preview: r.text.substring(0, 50) + '...' })));
   
   return diverseResults;
 }
@@ -914,13 +1028,23 @@ app.post('/api/qa', async (req, res) => {
     // Step 1: Extract keywords from the user's query
     let queryTerms = [];
     try {
-      const keywordsResponse = await axios.post(`${SEMANTIC_SEARCH_URL}/keywords`, { text: question });
+      const keywordsResponse = await axios.post(`${SEMANTIC_SEARCH_URL}/keywords`, { text: question }, {
+        timeout: 2000 // 2 second timeout
+      });
       if (keywordsResponse.data && keywordsResponse.data.keywords) {
         queryTerms = keywordsResponse.data.keywords;
         console.log(`Extracted keywords: ${queryTerms.join(', ')}`);
       }
     } catch (error) {
-      console.error('Error getting keywords, proceeding without them:', error.message);
+      // Silently fall back to simple keyword extraction if service isn't available
+      if (!error.message.includes('ECONNREFUSED') && !error.message.includes('404')) {
+        console.warn('Keyword extraction service not available, using simple extraction');
+      }
+      // Simple keyword extraction fallback
+      queryTerms = question.split(' ').filter(term => 
+        term.length > 2 && 
+        !['and', 'the', 'for', 'with', 'that', 'this', 'from', 'what', 'when', 'where', 'which', 'who', 'why', 'how', 'are', 'can', 'will', 'should', 'would', 'could'].includes(term.toLowerCase())
+      );
     }
 
     // Step 2: Perform semantic search to get relevant chunks
@@ -935,6 +1059,8 @@ app.post('/api/qa', async (req, res) => {
             use_enhanced_similarity: true,
             query_terms: queryTerms,
             top_k: 10
+        }, {
+            timeout: 3000 // 3 second timeout
         });
         if (searchResponse.data && searchResponse.data.results && searchResponse.data.results.length > 0) {
             relevantChunks = searchResponse.data.results;
@@ -942,7 +1068,10 @@ app.post('/api/qa', async (req, res) => {
             throw new Error('Semantic search returned no results');
         }
     } catch (searchError) {
-        console.error('Error calling semantic search server, using fallback:', searchError.message);
+        // Only log detailed error if it's not a simple connection issue
+        if (!searchError.message.includes('ECONNREFUSED') && !searchError.message.includes('404')) {
+            console.warn('Semantic search server not available, using fallback search');
+        }
         const queryEmbedding = await generateEmbeddings(question);
         const fallbackQueryTerms = queryTerms.length > 0 ? queryTerms : question.split(' ').filter(term => term.length > 2 && !['and', 'the', 'for', 'with', 'that', 'this', 'from', 'what', 'when', 'where', 'which', 'who', 'why', 'how'].includes(term.toLowerCase()));
         relevantChunks = enhancedFallbackSearch(

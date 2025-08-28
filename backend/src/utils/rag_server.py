@@ -11,7 +11,6 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Import the RAG module
 from rag_module import get_rag_system, RAGSystem
-from utils.semantic_search import cosine_similarity
 
 # Default port for the server
 DEFAULT_PORT = 5002

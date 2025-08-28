@@ -1,86 +1,40 @@
 import numpy as np
 from typing import List, Dict, Any, Optional, Tuple
 import re
+from sentence_transformers import SentenceTransformer
+import faiss
 
 # Constants for semantic chunking
 DEFAULT_CHUNK_SIZE = 300
 DEFAULT_OVERLAP = 50
 MIN_CHUNK_SIZE = 100
 
-def cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
-    """
-    Calculate cosine similarity between two vectors.
-    
-    Args:
-        vec1: First vector
-        vec2: Second vector
+class Searcher:
+    def __init__(self, model_name: str = 'all-MiniLM-L6-v2'):
+        self.model = SentenceTransformer(model_name)
+        self.index = None
+        self.document_chunks = []
+
+    def build_index(self, chunks: List[Dict[str, Any]]):
+        self.document_chunks = chunks
+        embeddings = self.model.encode([chunk['text'] for chunk in chunks], convert_to_tensor=True)
+        self.index = faiss.IndexFlatL2(embeddings.shape[1])
+        self.index.add(embeddings.cpu().detach().numpy())
+
+    def search(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+        if self.index is None:
+            return []
         
-    Returns:
-        Cosine similarity score (0-1)
-    """
-    if len(vec1) != len(vec2):
-        raise ValueError(f"Vector dimensions don't match: {len(vec1)} vs {len(vec2)}")
+        query_embedding = self.model.encode([query], convert_to_tensor=True)
+        distances, indices = self.index.search(query_embedding.cpu().detach().numpy(), top_k)
         
-    # Convert to numpy arrays for efficient computation
-    v1 = np.array(vec1)
-    v2 = np.array(vec2)
-    
-    # Calculate dot product
-    dot_product = np.dot(v1, v2)
-    
-    # Calculate magnitudes
-    mag1 = np.linalg.norm(v1)
-    mag2 = np.linalg.norm(v2)
-    
-    # Avoid division by zero
-    if mag1 == 0 or mag2 == 0:
-        return 0.0
-        
-    # Calculate cosine similarity
-    return dot_product / (mag1 * mag2)
-    
-def enhanced_similarity(vec1: List[float], vec2: List[float], text1: str, text2: str, query_terms: List[str] = None) -> float:
-    """
-    Calculate enhanced similarity that combines cosine similarity with keyword matching.
-    
-    Args:
-        vec1: First vector
-        vec2: Second vector
-        text1: Text corresponding to first vector
-        text2: Text corresponding to second vector
-        query_terms: List of important terms from the query
-        
-    Returns:
-        Enhanced similarity score (0-1)
-    """
-    # Base similarity from vector comparison
-    base_similarity = cosine_similarity(vec1, vec2)
-    
-    # If no query terms provided, return base similarity
-    if not query_terms:
-        return base_similarity
-    
-    # Calculate keyword match bonus
-    keyword_bonus = 0.0
-    text2_lower = text2.lower()
-    
-    # Check for presence of query terms in the text
-    for term in query_terms:
-        if term.lower() in text2_lower:
-            keyword_bonus += 0.05  # Add 0.05 for each matching term
-    
-    # Check for list-like content which is valuable for certain queries
-    list_indicators = [":\n", "- ", "• ", "* ", "\n1.", "\n2."]
-    if any(indicator in text2 for indicator in list_indicators):
-        keyword_bonus += 0.05
-    
-    # Cap the total bonus at 0.3 to avoid overwhelming the base similarity
-    keyword_bonus = min(keyword_bonus, 0.3)
-    
-    # Combine base similarity with keyword bonus
-    enhanced_score = min(base_similarity + keyword_bonus, 1.0)
-    
-    return enhanced_score
+        results = []
+        for i, idx in enumerate(indices[0]):
+            chunk = self.document_chunks[idx].copy()
+            chunk['similarity'] = 1 - distances[0][i]  # Convert distance to similarity
+            results.append(chunk)
+            
+        return results
 
 def semantic_chunk_text(text: str, target_size: int = DEFAULT_CHUNK_SIZE, 
                        overlap: int = DEFAULT_OVERLAP) -> List[Dict[str, Any]]:
@@ -217,145 +171,6 @@ def semantic_chunk_text(text: str, target_size: int = DEFAULT_CHUNK_SIZE,
         })
     
     return chunks
-
-def search_documents(query_embedding: List[float], document_chunks: List[Dict[str, Any]],
-                    chunk_embeddings: List[List[float]], top_k: int = 5, 
-                    use_enhanced_similarity: bool = False, query: str = "", 
-                    query_terms: List[str] = None) -> List[Dict[str, Any]]:
-    """
-    Search document chunks using vector similarity with optional enhanced scoring.
-    
-    Args:
-        query_embedding: Query embedding vector
-        document_chunks: List of document chunks
-        chunk_embeddings: List of chunk embedding vectors
-        top_k: Number of top results to return
-        use_enhanced_similarity: Whether to use enhanced similarity scoring
-        query: Original query text (needed for enhanced similarity)
-        query_terms: Query terms for keyword matching
-        
-    Returns:
-        List of top matching chunks with similarity scores
-    """
-    if len(document_chunks) != len(chunk_embeddings):
-        raise ValueError(f"Number of chunks ({len(document_chunks)}) doesn't match number of embeddings ({len(chunk_embeddings)})")
-    
-    # Set default for query_terms
-    if query_terms is None:
-        query_terms = []
-        
-    # Calculate similarity scores
-    similarities = []
-    for i, chunk_embedding in enumerate(chunk_embeddings):
-        if use_enhanced_similarity and query and i < len(document_chunks):
-            # Use enhanced similarity with keyword matching and list detection
-            similarity = enhanced_similarity(
-                query_embedding, 
-                chunk_embedding, 
-                query, 
-                document_chunks[i]['text'], 
-                query_terms
-            )
-        else:
-            # Use standard cosine similarity
-            similarity = cosine_similarity(query_embedding, chunk_embedding)
-        
-        similarities.append((i, similarity))
-    
-    # Sort by similarity (descending)
-    similarities.sort(key=lambda x: x[1], reverse=True)
-    
-    # Get top-k results
-    top_results = []
-    for i, similarity in similarities[:top_k]:
-        chunk = document_chunks[i].copy()
-        chunk['similarity'] = similarity
-        top_results.append(chunk)
-    
-    return top_results
-
-def extract_keywords(text: str, max_keywords: int = 15) -> List[str]:
-    """
-    Extract important keywords from text using TF-IDF like approach.
-    
-    Args:
-        text: Input text
-        max_keywords: Maximum number of keywords to extract
-        
-    Returns:
-        List of extracted keywords
-    """
-    # Extended stop words list for better filtering
-    stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'is', 'are', 'was', 'were', 
-                 'be', 'been', 'being', 'in', 'on', 'at', 'to', 'for', 'with', 'by',
-                 'about', 'as', 'of', 'that', 'this', 'these', 'those', 'it', 'its',
-                 'what', 'when', 'where', 'who', 'how', 'which', 'there', 'here', 'have',
-                 'has', 'had', 'do', 'does', 'did', 'can', 'could', 'will', 'would', 'should',
-                 'may', 'might', 'must', 'than', 'then', 'they', 'them', 'their'}
-    
-    # Check if text is a question and extract question focus
-    is_question = '?' in text
-    question_focus = []
-    if is_question:
-        # Extract potential question focus words
-        question_words = ['what', 'when', 'where', 'who', 'how', 'which', 'why']
-        text_lower = text.lower()
-        for qw in question_words:
-            if qw in text_lower:
-                # Get words after the question word
-                parts = text_lower.split(qw, 1)[1].split()
-                # Take a few words after the question word as potential focus
-                question_focus = [w.strip('.,?!()[]{}:;"\'') for w in parts[:3] 
-                                if len(w) > 3 and w not in stop_words]
-    
-    # Normalize text
-    text_lower = text.lower()
-    
-    # Remove punctuation and split into words
-    words = re.findall(r'\b\w+\b', text_lower)
-    
-    filtered_words = [word for word in words if word not in stop_words and len(word) > 2]
-    
-    # Count word frequencies with TF-IDF-like weighting
-    word_counts = {}
-    for word in filtered_words:
-        # Base frequency
-        base_freq = word_counts.get(word, 0) + 1
-        
-        # Apply weighting factors
-        weight = 1.0
-        
-        # Longer words often carry more meaning
-        if len(word) > 6:
-            weight *= 1.5
-        
-        # Words in title case might be proper nouns or important concepts
-        if word in text and word[0].isupper():
-            weight *= 1.3
-        
-        # Words in question focus get higher weight
-        if word in question_focus:
-            weight *= 2.0
-        
-        # Words that appear in the beginning might be more important
-        if word in ' '.join(filtered_words[:10]):
-            weight *= 1.2
-            
-        # Apply weighted frequency
-        word_counts[word] = base_freq * weight
-    
-    # Sort by weighted frequency
-    sorted_words = sorted(word_counts.items(), key=lambda x: x[1], reverse=True)
-    
-    # Get top keywords
-    keywords = [word for word, count in sorted_words[:max_keywords]]
-    
-    # Always include question focus words if they exist
-    for word in question_focus:
-        if word not in keywords and len(word) > 2:
-            keywords.append(word)
-    
-    return keywords
 
 def highlight_text(text: str, keywords: List[str]) -> str:
     """
