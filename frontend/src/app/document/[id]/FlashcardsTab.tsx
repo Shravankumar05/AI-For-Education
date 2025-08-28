@@ -24,6 +24,18 @@ const FlashcardsTab: React.FC<FlashcardsTabProps> = ({ documentId }) => {
   const [showAnswer, setShowAnswer] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
 
+// Function to format text with basic markdown support
+  const formatText = (text: string) => {
+    // Replace **text** with bold formatting
+    const parts = text.split(/(\*\*[^*]+\*\*)/g);
+    return parts.map((part, index) => {
+      if (part.startsWith('**') && part.endsWith('**')) {
+        return <strong key={index}>{part.slice(2, -2)}</strong>;
+      }
+      return part;
+    });
+  };
+
   const fetchFlashcards = async () => {
     try {
       setLoading(true);
@@ -175,19 +187,23 @@ const FlashcardsTab: React.FC<FlashcardsTabProps> = ({ documentId }) => {
           >
             {!showAnswer ? (
               /* Front of card - Question */
-              <div className="absolute inset-0 bg-white border-2 border-blue-200 rounded-xl p-6 flex items-center justify-center shadow-lg">
-                <div className="text-center">
+              <div className="absolute inset-0 bg-white border-2 border-blue-200 rounded-xl p-6 flex flex-col justify-center shadow-lg">
+                <div className="text-center h-full flex flex-col justify-center">
                   <div className="text-sm text-gray-500 mb-2">Question</div>
-                  <p className="text-lg font-medium text-gray-800">{currentFlashcard.question}</p>
+                  <div className="flex-1 overflow-y-auto max-h-48 px-2">
+                    <p className="text-lg font-medium text-gray-800">{formatText(currentFlashcard.question)}</p>
+                  </div>
                   <div className="text-sm text-gray-400 mt-4">Click to reveal answer</div>
                 </div>
               </div>
             ) : (
               /* Back of card - Answer */
-              <div className="absolute inset-0 bg-blue-50 border-2 border-blue-300 rounded-xl p-6 flex items-center justify-center shadow-lg">
-                <div className="text-center">
+              <div className="absolute inset-0 bg-blue-50 border-2 border-blue-300 rounded-xl p-6 flex flex-col justify-center shadow-lg">
+                <div className="text-center h-full flex flex-col justify-center">
                   <div className="text-sm text-blue-600 mb-2">Answer</div>
-                  <p className="text-lg font-medium text-gray-800">{currentFlashcard.answer}</p>
+                  <div className="flex-1 overflow-y-auto max-h-48 px-2">
+                    <p className="text-lg font-medium text-gray-800">{formatText(currentFlashcard.answer)}</p>
+                  </div>
                   <div className="text-sm text-blue-400 mt-4">Click to show question</div>
                 </div>
               </div>
