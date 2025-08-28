@@ -173,25 +173,25 @@ const FlashcardsTab: React.FC<FlashcardsTabProps> = ({ documentId }) => {
             className="relative w-full max-w-2xl h-80 cursor-pointer mb-6"
             onClick={toggleAnswer}
           >
-            <div className={`absolute inset-0 rounded-xl shadow-lg transition-transform duration-700 preserve-3d ${showAnswer ? 'rotate-y-180' : ''}`}>
-              {/* Front of card */}
-              <div className="absolute inset-0 bg-white border-2 border-blue-200 rounded-xl p-6 flex items-center justify-center backface-hidden">
+            {!showAnswer ? (
+              /* Front of card - Question */
+              <div className="absolute inset-0 bg-white border-2 border-blue-200 rounded-xl p-6 flex items-center justify-center shadow-lg">
                 <div className="text-center">
                   <div className="text-sm text-gray-500 mb-2">Question</div>
                   <p className="text-lg font-medium text-gray-800">{currentFlashcard.question}</p>
                   <div className="text-sm text-gray-400 mt-4">Click to reveal answer</div>
                 </div>
               </div>
-              
-              {/* Back of card */}
-              <div className="absolute inset-0 bg-blue-50 border-2 border-blue-300 rounded-xl p-6 flex items-center justify-center backface-hidden rotate-y-180">
+            ) : (
+              /* Back of card - Answer */
+              <div className="absolute inset-0 bg-blue-50 border-2 border-blue-300 rounded-xl p-6 flex items-center justify-center shadow-lg">
                 <div className="text-center">
                   <div className="text-sm text-blue-600 mb-2">Answer</div>
                   <p className="text-lg font-medium text-gray-800">{currentFlashcard.answer}</p>
                   <div className="text-sm text-blue-400 mt-4">Click to show question</div>
                 </div>
               </div>
-            </div>
+            )}
           </div>
 
           {/* Navigation Controls */}
